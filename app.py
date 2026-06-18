@@ -10,8 +10,8 @@ st.markdown("This system utilizes rule-based logic, **AbuseIPDB IP Reputation**,
 st.markdown("---")
 
 # 🔴 PLUG IN YOUR API KEYS HERE
-ABUSEIPDB_KEY = "436428cb16610e428bdc87c0b1e0b5b792de0ecad0818b82d6d13c4bec9c07f722734ac12aced58a"
-VIRUSTOTAL_KEY = "83a9c4dc1f5078cbf912abadae8f33c12d24346acb51ce220f3e385d0f0a4dcb"
+ABUSEIPDB_KEY = st.secrets["ABUSEIPDB_KEY"]
+VIRUSTOTAL_KEY = st.secrets["VIRUSTOTAL_KEY"]
 
 # Initialize session state for tracking resolved alerts
 if 'resolved_alerts' not in st.session_state:
