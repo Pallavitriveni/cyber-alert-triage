@@ -1,0 +1,30 @@
+[
+  {
+    "alert_id": "A101",
+    "timestamp": "2026-06-18 10:00:00",
+    "rule_name": "Unusual Internal Traffic",
+    "source_ip": "192.168.1.50",
+    "destination_ip": "192.168.1.255",
+    "hostname": "PRINTER-01",
+    "severity": "Low"
+  },
+  {
+    "alert_id": "A102",
+    "timestamp": "2026-06-18 10:05:00",
+    "rule_name": "Brute Force Attempt",
+    "source_ip": "185.220.101.5",
+    "destination_ip": "10.0.0.4",
+    "hostname": "FINANCE-SRV",
+    "severity": "High"
+  },
+  {
+    "alert_id": "A103",
+    "timestamp": "2026-06-18 10:12:00",
+    "rule_name": "Malware Beaconing",
+    "source_ip": "10.0.0.15",
+    "destination_ip": "93.184.216.34",
+    "hostname": "CEO-LAPTOP",
+    "severity": "Critical",
+    "file_hash": "247c41e5f0ea99cdca197d1e32d4b74a63117e6e3196a6f3b06ef027f3152012"
+  }
+]
