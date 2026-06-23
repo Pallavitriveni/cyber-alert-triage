@@ -1,168 +1,286 @@
+import sqlite3
+import uuid
+import datetime
+import pandas as pd
 import streamlit as st
-import json
-import requests
 
-# Set up the web page
-st.set_page_config(page_title="Next-Gen SOC Triage Dashboard", page_icon="🛡️", layout="wide")
+# Set page configuration first before any other Streamlit commands
+st.set_page_config(page_title="Enterprise SOC Hub", page_icon="🛡️", layout="wide")
 
-st.title("🛡️ Next-Gen Security Alert Triage Center")
-st.markdown("This system utilizes rule-based logic, **AbuseIPDB IP Reputation**, and **VirusTotal Malware Hash Intelligence**.")
-st.markdown("---")
-
-# 🔴 PLUG IN YOUR API KEYS HERE
-ABUSEIPDB_KEY = st.secrets["ABUSEIPDB_KEY"]
-VIRUSTOTAL_KEY = st.secrets["VIRUSTOTAL_KEY"]
-
-# Initialize session state for tracking resolved alerts
-if 'resolved_alerts' not in st.session_state:
-    st.session_state.resolved_alerts = []
-
-# Automated alerting simulation function
-def send_incident_alert(alert_id, hostname, threat_name, confidence, source="API Matrix"):
-    email_body = f"""
-    ======================================================================
-    🚨 URGENT: CRITICAL SECURITY INCIDENT CONFIRMED BY TRIAGE ENGINE 🚨
-    ======================================================================
-    Alert ID: {alert_id}
-    Target Host: {hostname}
-    Threat Type: {threat_name}
-    Verdict Source: {source}
-    Live Intel Status: confirmed malicious malicious activity detected.
-    Action Required: Isolate host machine from network immediately.
-    ======================================================================
-    """
-    print(email_body)
-    return True
-
-# Function 1: Check IP reputation via AbuseIPDB
-def check_ip_reputation(ip_address):
-    if ip_address.startswith("192.168.") or ip_address.startswith("10."):
-        return {"confidence_score": 0, "total_reports": 0, "country": "Internal Network"}
+# --- 0. SECURITY & AUTHENTICATION BARRIER ---
+def login_screen():
+    """Renders a secure login overlay. Returns True if authenticated."""
+    # Custom enterprise styling for the login card
+    st.markdown("""
+        <style>
+        .login-box {
+            padding: 2rem;
+            border-radius: 10px;
+            background-color: #1E1E1E;
+            border: 1px solid #333333;
+        }
+        </style>
+    """, unsafe_allow_html=True)
     
-    url = 'https://api.abuseipdb.com/api/v2/check'
-    querystring = {'ipAddress': ip_address, 'maxAgeInDays': '90'}
-    headers = {'Accept': 'application/json', 'Key': ABUSEIPDB_KEY}
+    st.write("## 🛡️ Enterprise Security Operations Gate")
+    st.caption("Authorized Personnel Access Only — Activity is Logged and Audited")
     
-    try:
-        response = requests.get(url, headers=headers, params=querystring, timeout=5)
-        if response.status_code == 200:
-            data = response.json()['data']
-            return {
-                "confidence_score": data['abuseConfidenceScore'],
-                "total_reports": data['totalReports'],
-                "country": data['countryCode']
-            }
-    except Exception:
-        pass
-    return {"confidence_score": "Error/No Key", "total_reports": "N/A", "country": "Unknown"}
-
-# Function 2: Check File Hash via VirusTotal V3 API
-def check_file_hash(file_hash):
-    if not file_hash:
-        return None
+    with st.container():
+        username = st.text_input("Analyst ID / Username")
+        password = st.text_input("Security Passphrase / Token", type="password")
+        login_btn = st.button("🔐 Authenticate Session", use_container_width=True)
         
-    url = f"https://www.virustotal.com/api/v3/files/{file_hash}"
-    headers = {
-        "accept": "application/json",
-        "x-api-key": VIRUSTOTAL_KEY
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            attributes = response.json()['data']['attributes']
-            stats = attributes['last_analysis_stats']
-            return {
-                "malicious_count": stats['malicious'],
-                "harmless_count": stats['harmless'],
-                "undetected_count": stats['undetected'],
-                "file_type": attributes.get('type_description', 'Unknown File Type')
-            }
-        elif response.status_code == 404:
-            return {"malicious_count": 0, "harmless_count": 0, "undetected_count": 0, "file_type": "Clean/Unknown Hash"}
-    except Exception:
-        pass
-    return {"malicious_count": "Error", "harmless_count": "Error", "undetected_count": "Error", "file_type": "API Error"}
-
-
-# Load data
-with open('alerts.json', 'r') as file:
-    alerts = json.load(file)
-
-true_positives = []
-false_positives = []
-
-for alert in alerts:
-    if alert['alert_id'] in st.session_state.resolved_alerts:
-        continue
-
-    if "PRINTER" in alert['hostname'].upper():
-        alert['reason'] = "Automatically filtered: Known harmless printer broadcast."
-        false_positives.append(alert)
-    elif alert['severity'] in ["High", "Critical"]:
-        # Run IP Checks
-        intel_ip = check_ip_reputation(alert['source_ip'])
-        alert['intel_ip'] = intel_ip
-        
-        # Run File Hash Checks if present
-        hash_present = alert.get('file_hash', None)
-        intel_hash = check_file_hash(hash_present) if hash_present else None
-        alert['intel_hash'] = intel_hash
-        
-        alert['reason'] = "Escalated: Validated via automated multiple-intelligence lookup."
-        true_positives.append(alert)
-        
-        # Email notification automation triggers
-        if isinstance(intel_ip['confidence_score'], int) and intel_ip['confidence_score'] >= 80:
-            send_incident_alert(alert['alert_id'], alert['hostname'], alert['rule_name'], f"IP {intel_ip['confidence_score']}%", "AbuseIPDB")
-        if intel_hash and isinstance(intel_hash['malicious_count'], int) and intel_hash['malicious_count'] > 0:
-            send_incident_alert(alert['alert_id'], alert['hostname'], alert['rule_name'], f"Hash flag count: {intel_hash['malicious_count']}", "VirusTotal")
-            
-    else:
-        alert['reason'] = "Unclassified low priority noise."
-        false_positives.append(alert)
-
-# Layout Setup
-col1, col2 = st.columns(2)
-
-with col1:
-    st.error(f"🚨 True Positives Requiring Action ({len(true_positives)})")
-    for tp in true_positives:
-        with st.expander(f"⚠️ {tp['rule_name']} on {tp['hostname']}"):
-            st.write(f"**Alert ID:** {tp['alert_id']} | **Severity:** {tp['severity']}")
-            st.write(f"**Source IP:** `{tp['source_ip']}` ➡️ **Destination IP:** `{tp['destination_ip']}`")
-            
-            # Sub-Section A: Display IP Data
-            st.markdown("🌐 **Network Intelligence (AbuseIPDB):**")
-            st.code(f"• Confidence Score: {tp['intel_ip']['confidence_score']}%\n"
-                    f"• Total Reports: {tp['intel_ip']['total_reports']}\n"
-                    f"• Country: {tp['intel_ip']['country']}")
-            
-            # Sub-Section B: Display File Hash Data if available
-            if tp.get('intel_hash'):
-                st.markdown("🪲 **File Payload Intelligence (VirusTotal):**")
-                m_count = tp['intel_hash']['malicious_count']
-                
-                # Color code based on danger level
-                if isinstance(m_count, int) and m_count > 0:
-                    st.error(f"🚨 MALWARE DETECTED! Flags: {m_count} Antivirus Engines marked this file as dangerous.")
-                else:
-                    st.success("✅ File Hash not flagged by Antivirus Engines.")
-                    
-                st.code(f"• File Classification: {tp['intel_hash']['file_type']}\n"
-                        f"• Hash String: {tp['file_hash']}\n"
-                        f"• Clean/Undetected Eng: {tp['intel_hash']['undetected_count']}")
-                
-                if isinstance(m_count, int) and m_count > 5:
-                    st.toast(f"🪲 Severe malware detection alert for {tp['alert_id']}!", icon="🚨")
-
-            if st.button(f"✅ Mark Alert {tp['alert_id']} as Remediated", key=tp['alert_id']):
-                st.session_state.resolved_alerts.append(tp['alert_id'])
+        if login_btn:
+            # Corporate Hardcoded Credentials (In production, these would be hashed or tied to LDAP/SSO)
+            if username == "pallavi_secures" and password == "SOC_Analyst_2026":
+                st.session_state['authenticated'] = True
+                st.success("Session Verified. Initializing environment...")
                 st.rerun()
+            else:
+                st.error("Authentication Failure: Invalid Username or Passphrase.")
+                st.session_state['authenticated'] = False
 
-with col2:
-    st.success(f"✅ Automatically Filtered False Positives ({len(false_positives)})")
-    for fp in false_positives:
-        with st.expander(f"🟢 {fp['rule_name']} (Dropped)"):
-            st.write(f"**Alert ID:** {fp['alert_id']} | **Host:** {fp['hostname']}")
-            st.write(f"**Reason:** {fp['reason']}")
+# Manage session state for login persistence
+if 'authenticated' not in st.session_state:
+    st.session_state['authenticated'] = False
+
+if not st.session_state['authenticated']:
+    login_screen()
+    st.stop() # CRITICAL: Freezes the execution of the rest of the file until authenticated
+
+# --- THE REST OF YOUR EXISTING CODE CONTINUES BELOW ---
+# (Your original init_db(), inject_mock_alerts(), layouts, and charts stay exactly where they are!)
+
+# --- 1. DATABASE SETUP ---
+def init_db():
+    """Initializes the SQLite database and creates the alerts table if it doesn't exist."""
+    conn = sqlite3.connect("triage_workspace.db")
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS alerts (
+            id TEXT PRIMARY KEY,
+            timestamp TEXT,
+            rule_name TEXT,
+            source_ip TEXT,
+            severity TEXT,
+            status TEXT DEFAULT 'New',
+            analyst TEXT DEFAULT 'Unassigned',
+            notes TEXT DEFAULT ''
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def update_alert_in_db(alert_id, status, analyst, notes):
+    """Updates a specific alert's triage details in the database."""
+    conn = sqlite3.connect("triage_workspace.db")
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE alerts 
+        SET status = ?, analyst = ?, notes = ? 
+        WHERE id = ?
+    ''', (status, analyst, notes, alert_id))
+    conn.commit()
+    conn.close()
+
+def inject_mock_alerts():
+    """Seeds the database with mock data if it's completely empty."""
+    conn = sqlite3.connect("triage_workspace.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM alerts")
+    if cursor.fetchone()[0] == 0:
+        mock_data = [
+            (str(uuid.uuid4())[:8], '2026-06-23 10:14:22', 'Brute Force Attempt', '192.168.1.45', 'High'),
+            (str(uuid.uuid4())[:8], '2026-06-23 11:02:15', 'SQL Injection Detected', '10.0.0.12', 'Critical'),
+            (str(uuid.uuid4())[:8], '2026-06-23 11:45:00', 'Phishing Domain Accessed', '172.16.5.89', 'Medium')
+        ]
+        cursor.executemany('''
+            INSERT INTO alerts (id, timestamp, rule_name, source_ip, severity, status, analyst, notes)
+            VALUES (?, ?, ?, ?, ?, 'New', 'Unassigned', '')
+        ''', mock_data)
+        conn.commit()
+    conn.close()
+
+# Initialize Database
+init_db()
+inject_mock_alerts()
+
+# --- 2. UI LAYOUT & SIEM INGESTION ---
+st.title("🛡️ Enterprise SOC Triage Workspace")
+st.caption("Real-time collaborative incident management dashboard")
+
+# Sidebar for controls and integrations
+with st.sidebar:
+    st.header("⚡ SIEM Integrations")
+    st.caption("Connect live security telemetry pipelines")
+    
+    # Active Connection Indicator
+    st.success("🟢 Connected to Wazuh API")
+    
+    # The Ingestion Trigger Button
+    if st.button("📥 Fetch Latest SIEM Alerts"):
+        import datetime
+        import random
+        
+        # Simulated live incoming SIEM alerts
+        live_siem_feed = [
+            ('Brute Force - Admin Account', '10.0.4.55', 'High'),
+            ('Unusual PowerShell Execution', '192.168.10.11', 'Critical'),
+            ('AWS IAM Policy Modification', '172.16.44.3', 'Medium'),
+            ('Malware Telemetry - Command & Control', '10.100.2.14', 'Critical')
+        ]
+        
+        # Pick a random event to simulate real-time log ingestion
+        chosen_alert = random.choice(live_siem_feed)
+        new_id = str(uuid.uuid4())[:8]
+        current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Inject the live alert into our real database tracking system
+        conn = sqlite3.connect("triage_workspace.db")
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO alerts (id, timestamp, rule_name, source_ip, severity, status, analyst, notes)
+            VALUES (?, ?, ?, ?, ?, 'New', 'Unassigned', '')
+        ''', (new_id, current_time, chosen_alert[0], chosen_alert[1], chosen_alert[2]))
+        conn.commit()
+        conn.close()
+        
+        st.toast(f"New alert {new_id} ingested from SIEM pipeline!", icon="🔥")
+        st.rerun()
+
+    st.markdown("---")
+    st.header("Workspace Controls")
+    if st.button("🔄 Refresh Dashboard"):
+        st.rerun()
+    
+    if st.button("⚠️ Reset/Clear Queue Data"):
+        conn = sqlite3.connect("triage_workspace.db")
+        conn.cursor().execute("DROP TABLE IF EXISTS alerts")
+        conn.commit()
+        conn.close()
+        init_db()
+        inject_mock_alerts()
+        st.sidebar.success("Queue reset to mock defaults!")
+        st.rerun()
+
+# Fetch latest data from local DB
+conn = sqlite3.connect("triage_workspace.db")
+df_alerts = pd.read_sql_query("SELECT * FROM alerts", conn)
+conn.close()
+
+# --- 2.5 REAL-TIME THREAT INTEL VISUALS ---
+st.markdown("---")
+st.subheader("📊 Real-Time Threat Intelligence Metrics")
+
+if not df_alerts.empty:
+    # Create two parallel columns for our visual charts
+    chart_col1, chart_col2 = st.columns(2)
+    
+    with chart_col1:
+        st.markdown("##### 🚨 Incident Severity Distribution")
+        # Count occurrences of each severity level
+        severity_counts = df_alerts['severity'].value_counts().reset_index()
+        severity_counts.columns = ['Severity', 'Count']
+        
+        # Display a clean bar chart mapping the severity metrics
+        st.bar_chart(data=severity_counts, x='Severity', y='Count', use_container_width=True)
+        
+    with chart_col2:
+        st.markdown("##### ⚔️ Top Attack Vectors (Rule Triggers)")
+        # Count occurrences of each triggered rule
+        rule_counts = df_alerts['rule_name'].value_counts().reset_index()
+        rule_counts.columns = ['Detection Rule', 'Alert Count']
+        
+        # Display a horizontal or vertical area/bar chart for attack vectors
+        st.line_chart(data=rule_counts, x='Detection Rule', y='Alert Count', use_container_width=True)
+else:
+    st.info("No threat data available to generate metrics. Ingest alerts from the SIEM pipeline panel.")
+
+# --- 3. THE LIVE QUEUE VIEW ---
+st.subheader("📥 Active Incident Queue")
+
+# Display a clean, high-level summary table of the alerts
+st.dataframe(
+    df_alerts[['id', 'timestamp', 'rule_name', 'source_ip', 'severity', 'status', 'analyst']],
+    use_container_width=True,
+    hide_index=True
+)
+
+# --- 4. THE TRIAGE WORKBENCH ---
+st.markdown("---")
+st.subheader("🕵️‍♂️ Analyst Investigation Pane")
+
+# Let the analyst pick which Alert ID they want to investigate
+alert_options = df_alerts['id'].tolist()
+selected_id = st.selectbox("Select an Incident ID to investigate/triage:", alert_options)
+
+if selected_id:
+    # Get details of the selected alert
+    alert_details = df_alerts[df_alerts['id'] == selected_id].iloc[0]
+    
+    # Visual metrics layout
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Triggered Rule", alert_details['rule_name'])
+    with col2:
+        st.metric("Source IP", alert_details['source_ip'])
+    with col3:
+        st.metric("Current Status", alert_details['status'])
+        
+    # Interactive Triage Form
+    st.markdown("### Update Incident Lifecycle")
+    
+    # We use a form so components don't refresh the page until the user hits "Save"
+    with st.form("triage_form", clear_on_submit=False):
+        status_options = ['New', 'In Progress', 'True Positive (Escalated)', 'False Positive (Closed)']
+        current_status_idx = status_options.index(alert_details['status']) if alert_details['status'] in status_options else 0
+        
+        updated_status = st.selectbox("Incident Status", status_options, index=current_status_idx)
+        updated_analyst = st.text_input("Assigned Analyst Name", value=alert_details['analyst'])
+        updated_notes = st.text_area("Analyst Investigation Notes / Root Cause Analysis", value=alert_details['notes'])
+        
+        submit_btn = st.form_submit_button("💾 Save & Commit Changes")
+        
+        if submit_btn:
+            update_alert_in_db(selected_id, updated_status, updated_analyst, updated_notes)
+            st.success(f"Incident {selected_id} successfully updated inside the database!")
+            st.rerun()
+            # --- 5. AUTOMATED INCIDENT REPORT GENERATION ---
+    st.markdown("### 📄 Incident Documentation")
+    st.caption("Generate an audit-ready compliance report for this incident archive.")
+    
+    # Construct a clean Markdown report string using the current alert's live database values
+    report_content = f"""# INCIDENT TRIAGE REPORT: REQ-{alert_details['id']}
+==================================================
+**Generated On:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+**Incident Status:** {alert_details['status']}
+**Assigned Investigator:** {alert_details['analyst']}
+
+## 1. Incident Overview
+-----------------------
+* **Incident ID:** {alert_details['id']}
+* **Timestamp:** {alert_details['timestamp']}
+* **Triggered Detection Rule:** {alert_details['rule_name']}
+* **Severity Level:** {alert_details['severity']}
+
+## 2. Network Telemetry Context
+-------------------------------
+* **Source/Attacker IP:** {alert_details['source_ip']}
+* **Target Environment:** Enterprise Internal Network Segment
+
+## 3. Analyst Investigation & Root Cause Notes
+----------------------------------------------
+{alert_details['notes'] if alert_details['notes'] else 'No investigation notes provided by the analyst.'}
+
+==================================================
+*Confidentiality Notice: This document contains proprietary security telemetry and is intended solely for internal SOC operations.*
+"""
+
+    # Streamlit native download button handles file generation instantly on click
+    st.download_button(
+        label="📥 Export Full Incident Package (.md)",
+        data=report_content,
+        file_name=f"Incident_Report_{alert_details['id']}.md",
+        mime="text/markdown",
+        use_container_width=True
+    )
